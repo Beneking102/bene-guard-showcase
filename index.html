@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>bene-guard — Real-time Security for VS Code</title>
+<meta name="description" content="CVE scanning, header linting, STRIDE threat modeling, and one-click fixes — all inside your editor.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-deep: #0a0a0f;
+  --bg-card: #12121a;
+  --bg-card-hover: #181824;
+  --bg-surface: #1a1a28;
+  --accent: #3be08a;
+  --accent-dim: #2ab36d;
+  --accent-glow: rgba(59, 224, 138, 0.15);
+  --accent-glow-strong: rgba(59, 224, 138, 0.25);
+  --red: #f05454;
+  --amber: #f0a030;
+  --blue: #4d9ef0;
+  --text-primary: #e8e6e1;
+  --text-secondary: #8a8892;
+  --text-tertiary: #5a5865;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-accent: rgba(59, 224, 138, 0.2);
+  --font-display: 'Outfit', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-display);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Noise overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Grid background */
+.grid-bg {
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(59, 224, 138, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59, 224, 138, 0.03) 1px, transparent 1px);
+  background-size: 64px 64px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Glow blobs */
+.glow-1, .glow-2, .glow-3 {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(120px);
+  pointer-events: none;
+  z-index: 0;
+}
+.glow-1 {
+  width: 600px; height: 600px;
+  background: rgba(59, 224, 138, 0.06);
+  top: -200px; left: -200px;
+}
+.glow-2 {
+  width: 500px; height: 500px;
+  background: rgba(77, 158, 240, 0.04);
+  top: 50%; right: -200px;
+}
+.glow-3 {
+  width: 400px; height: 400px;
+  background: rgba(59, 224, 138, 0.04);
+  bottom: -100px; left: 30%;
+}
+
+section, header, footer { position: relative; z-index: 1; }
+
+/* ─── NAV ─── */
+nav {
+  position: fixed;
+  top: 0;
+  width: 100%;
+  z-index: 100;
+  padding: 16px 0;
+  backdrop-filter: blur(20px);
+  background: rgba(10, 10, 15, 0.8);
+  border-bottom: 1px solid var(--border);
+}
+.nav-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: var(--text-primary);
+}
+.nav-brand .shield {
+  width: 28px; height: 28px;
+  background: var(--accent);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M12 2L3 7v5c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z'/%3E%3C/svg%3E") center/contain no-repeat;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='currentColor'%3E%3Cpath d='M12 2L3 7v5c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+.nav-brand span {
+  font-weight: 600;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+.nav-links { display: flex; gap: 32px; align-items: center; }
+.nav-links a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 400;
+  transition: color 0.2s;
+}
+.nav-links a:hover { color: var(--text-primary); }
+.btn-install {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  background: var(--accent);
+  color: #0a0a0f;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+  transition: all 0.2s;
+  border: none;
+  cursor: pointer;
+}
+.btn-install:hover {
+  background: #4df09a;
+  box-shadow: 0 0 24px var(--accent-glow-strong);
+}
+
+/* ─── HERO ─── */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 140px 32px 80px;
+}
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-radius: 100px;
+  border: 1px solid var(--border-accent);
+  background: var(--accent-glow);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent);
+  margin-bottom: 32px;
+  animation: fadeUp 0.6s ease both;
+}
+.hero-badge .dot {
+  width: 6px; height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+.hero h1 {
+  font-size: clamp(42px, 7vw, 80px);
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  max-width: 800px;
+  margin-bottom: 24px;
+  animation: fadeUp 0.6s ease 0.1s both;
+}
+.hero h1 .gradient {
+  background: linear-gradient(135deg, var(--accent) 0%, #4df0c0 50%, var(--blue) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.hero p {
+  font-size: 18px;
+  color: var(--text-secondary);
+  max-width: 560px;
+  line-height: 1.7;
+  margin-bottom: 40px;
+  animation: fadeUp 0.6s ease 0.2s both;
+}
+.hero-actions {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 64px;
+  animation: fadeUp 0.6s ease 0.3s both;
+}
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 28px;
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-weight: 500;
+  font-size: 15px;
+  text-decoration: none;
+  transition: all 0.2s;
+  font-family: var(--font-display);
+  cursor: pointer;
+}
+.btn-secondary:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.03);
+}
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 28px;
+  background: var(--accent);
+  color: #0a0a0f;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 15px;
+  text-decoration: none;
+  transition: all 0.2s;
+  border: none;
+  font-family: var(--font-display);
+  cursor: pointer;
+}
+.btn-primary:hover {
+  background: #4df09a;
+  box-shadow: 0 0 32px var(--accent-glow-strong);
+}
+
+/* Hero screenshot */
+.hero-screenshot {
+  max-width: 1000px;
+  width: 100%;
+  animation: fadeUp 0.8s ease 0.4s both;
+}
+.screenshot-frame {
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  box-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.4),
+    0 0 80px var(--accent-glow);
+  background: var(--bg-card);
+}
+.screenshot-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+.screenshot-dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+}
+.screenshot-dot.r { background: #f05454; }
+.screenshot-dot.y { background: #f0a030; }
+.screenshot-dot.g { background: #3be08a; }
+.screenshot-titlebar span {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  margin-left: 8px;
+}
+.screenshot-frame img {
+  width: 100%;
+  display: block;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── FEATURES ─── */
+.features {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 80px 32px 120px;
+}
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 16px;
+}
+.features > h2 {
+  font-size: clamp(32px, 4vw, 48px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 64px;
+  max-width: 600px;
+}
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+.feature-card {
+  padding: 36px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  transition: all 0.3s;
+}
+.feature-card:hover {
+  border-color: var(--border-accent);
+  background: var(--bg-card-hover);
+  box-shadow: 0 0 40px var(--accent-glow);
+}
+.feature-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+  font-size: 22px;
+}
+.feature-icon.scan { background: rgba(240, 84, 84, 0.12); color: var(--red); }
+.feature-icon.header { background: rgba(240, 160, 48, 0.12); color: var(--amber); }
+.feature-icon.fix { background: rgba(59, 224, 138, 0.12); color: var(--accent); }
+.feature-icon.stride { background: rgba(77, 158, 240, 0.12); color: var(--blue); }
+.feature-card h3 {
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  letter-spacing: -0.01em;
+}
+.feature-card p {
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+/* ─── GRADE BAR ─── */
+.grade-section {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 32px 120px;
+}
+.grade-bar {
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  padding: 48px;
+  display: flex;
+  align-items: center;
+  gap: 48px;
+}
+.grade-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.grade-letter {
+  font-size: 72px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+.grade-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.grade-details { flex: 1; }
+.grade-details h3 {
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  letter-spacing: -0.01em;
+}
+.grade-details p {
+  font-size: 15px;
+  color: var(--text-secondary);
+  line-height: 1.65;
+  margin-bottom: 24px;
+}
+.grade-items {
+  display: flex;
+  gap: 24px;
+}
+.grade-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+.grade-item .dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+}
+.grade-item .dot.green { background: var(--accent); }
+.grade-item .dot.amber { background: var(--amber); }
+.grade-item .dot.blue { background: var(--blue); }
+
+/* ─── INSTALL ─── */
+.install-section {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 32px 120px;
+}
+.install-card {
+  border-radius: 16px;
+  border: 1px solid var(--border-accent);
+  background: linear-gradient(135deg, rgba(59, 224, 138, 0.04) 0%, rgba(77, 158, 240, 0.02) 100%);
+  padding: 64px;
+  text-align: center;
+}
+.install-card h2 {
+  font-size: clamp(28px, 3.5vw, 40px);
+  font-weight: 700;
+  margin-bottom: 16px;
+  letter-spacing: -0.02em;
+}
+.install-card p {
+  font-size: 16px;
+  color: var(--text-secondary);
+  margin-bottom: 36px;
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.6;
+}
+.install-methods {
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.install-method {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  transition: all 0.2s;
+}
+.install-method:hover {
+  border-color: var(--border-accent);
+  background: var(--bg-card-hover);
+}
+.install-method code {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--accent);
+}
+.install-method .label {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ─── TECH STACK ─── */
+.tech-section {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 32px 120px;
+  text-align: center;
+}
+.tech-pills {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 32px;
+}
+.tech-pill {
+  padding: 8px 20px;
+  border-radius: 100px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-weight: 400;
+}
+
+/* ─── FOOTER ─── */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 40px 32px;
+  text-align: center;
+}
+.footer-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.footer-inner p {
+  font-size: 14px;
+  color: var(--text-tertiary);
+}
+.footer-links { display: flex; gap: 24px; }
+.footer-links a {
+  font-size: 14px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.footer-links a:hover { color: var(--text-primary); }
+
+/* ─── RESPONSIVE ─── */
+@media (max-width: 768px) {
+  .feature-grid { grid-template-columns: 1fr; }
+  .grade-bar { flex-direction: column; text-align: center; padding: 36px 24px; }
+  .grade-items { justify-content: center; flex-wrap: wrap; }
+  .install-card { padding: 40px 24px; }
+  .install-methods { flex-direction: column; align-items: center; }
+  .footer-inner { flex-direction: column; gap: 16px; }
+  .nav-links a:not(.btn-install) { display: none; }
+  .hero-actions { flex-direction: column; align-items: center; }
+}
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+<div class="glow-1"></div>
+<div class="glow-2"></div>
+<div class="glow-3"></div>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-inner">
+    <a href="#" class="nav-brand">
+      <div class="shield"></div>
+      <span>bene-guard</span>
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/Beneking102" target="_blank">GitHub</a>
+      <a href="https://open-vsx.org/extension/beneking102/bene-guard" target="_blank" class="btn-install">
+        Get extension
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="hero-badge">
+    <div class="dot"></div>
+    v1.0 — now on Open VSX
+  </div>
+  <h1>Security scanning<br><span class="gradient">inside your editor</span></h1>
+  <p>CVE detection, OWASP header linting, STRIDE threat modeling, and one-click fixes — all without leaving VS Code.</p>
+  <div class="hero-actions">
+    <a href="https://open-vsx.org/extension/beneking102/bene-guard" target="_blank" class="btn-primary">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Install extension
+    </a>
+    <a href="#features" class="btn-secondary">
+      See features
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+    </a>
+  </div>
+  <div class="hero-screenshot">
+    <div class="screenshot-frame">
+      <div class="screenshot-titlebar">
+        <div class="screenshot-dot r"></div>
+        <div class="screenshot-dot y"></div>
+        <div class="screenshot-dot g"></div>
+        <span>bene-guard — VS Code</span>
+      </div>
+      <img src="screenshot.png" alt="bene-guard running in VS Code showing security overview sidebar with A+ grade, CVE findings, and STRIDE threat analysis" />
+    </div>
+  </div>
+</section>
+
+<!-- Features -->
+<section class="features" id="features">
+  <div class="section-label">Features</div>
+  <h2>Everything you need to ship secure code</h2>
+  <div class="feature-grid">
+    <div class="feature-card">
+      <div class="feature-icon scan">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      </div>
+      <h3>CVE scanning</h3>
+      <p>Scans package.json and lock files on every save. Queries the OSV API — the same database behind GitHub Dependabot — and shows inline diagnostics with severity-coded colours and direct advisory links.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon header">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      </div>
+      <h3>Header linting</h3>
+      <p>Parses Next.js, Vercel, Netlify, and Helmet configs. Checks 7 OWASP headers against production best practices. Flags missing headers and dangerous misconfigurations like unsafe-inline CSP and wildcard CORS.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon fix">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+      </div>
+      <h3>One-click fixes</h3>
+      <p>Every finding comes with lightbulb actions. Insert secure defaults, strip unsafe directives from CSP, or jump straight to the relevant OWASP cheat sheet. Fix vulnerabilities without leaving your editor.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon stride">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      </div>
+      <h3>STRIDE threat model</h3>
+      <p>Analyzes your codebase for auth surfaces, databases, API routes, external services, secrets, and file I/O. Maps each component to STRIDE threat categories with severity and mitigation suggestions.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Grade bar -->
+<section class="grade-section">
+  <div class="grade-bar">
+    <div class="grade-display">
+      <div class="grade-letter">A+</div>
+      <div class="grade-label">Security grade</div>
+    </div>
+    <div class="grade-details">
+      <h3>One grade. Full picture.</h3>
+      <p>bene-guard combines CVE severity scores, header configuration weights, and STRIDE threat surface analysis into a single letter grade — visible in your status bar and sidebar at all times.</p>
+      <div class="grade-items">
+        <div class="grade-item"><div class="dot green"></div>CVE findings</div>
+        <div class="grade-item"><div class="dot amber"></div>Header misconfigs</div>
+        <div class="grade-item"><div class="dot blue"></div>STRIDE threats</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Install -->
+<section class="install-section" id="install">
+  <div class="install-card">
+    <h2>Get started in seconds</h2>
+    <p>Install from Open VSX or download the .vsix directly. Works with VS Code, VSCodium, Cursor, Windsurf, and Gitpod.</p>
+    <div class="install-methods">
+      <div class="install-method">
+        <div>
+          <div class="label">Open VSX</div>
+          <code>Search "bene-guard"</code>
+        </div>
+      </div>
+      <div class="install-method">
+        <div>
+          <div class="label">VS Code</div>
+          <code>Ctrl+Shift+P → Install from VSIX</code>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Tech -->
+<section class="tech-section">
+  <div class="section-label">Built with</div>
+  <div class="tech-pills">
+    <div class="tech-pill">TypeScript</div>
+    <div class="tech-pill">VS Code API</div>
+    <div class="tech-pill">OSV API</div>
+    <div class="tech-pill">OWASP</div>
+    <div class="tech-pill">STRIDE</div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="footer-inner">
+    <p>&copy; 2026 Benedikt Pankratz</p>
+    <div class="footer-links">
+      <a href="https://github.com/Beneking102" target="_blank">GitHub</a>
+      <a href="https://benedikt-pkr.info" target="_blank">Portfolio</a>
+      <a href="https://open-vsx.org/extension/beneking102/bene-guard" target="_blank">Open VSX</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
